@@ -55,6 +55,9 @@ models:
 
   # keys are the model names used in API requests
   "llama":
+    # macros: model-local macros
+    macros:
+      context_window: 32768
     # cmd: the command to run to start the inference server.
     # - required
     # - it is just a string, similar to what you would run on the CLI
@@ -64,6 +67,7 @@ models:
       # ${latest-llama} is a macro that is defined above
       ${latest-llama}
       --model path/to/llama-8B-Q4_K_M.gguf
+      --ctx-size ${context_window}
 
     # name: a display name for the model
     # - optional, default: empty string
@@ -128,6 +132,10 @@ models:
       # - can be any JSON key in the request body
       # - recommended to stick to sampling parameters
       strip_params: "temperature, top_p, top_k"
+
+    # metadata: a list of model-local macros to be included in /v1/models
+    metadata:
+      - context_window
 
     # concurrencyLimit: overrides the allowed number of active parallel requests to a model
     # - optional, default: 0

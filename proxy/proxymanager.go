@@ -370,6 +370,23 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			record["description"] = desc
 		}
 
+		metadata := make(map[string]any)
+		for _, key := range modelConfig.Metadata {
+			if value, ok := modelConfig.Macros[key]; ok {
+				// attempt to convert to a number
+				if i, err := strconv.Atoi(value); err == nil {
+					metadata[key] = i
+				} else if f, err := strconv.ParseFloat(value, 64); err == nil {
+					metadata[key] = f
+				} else {
+					metadata[key] = value
+				}
+			}
+		}
+		if len(metadata) > 0 {
+			record["metadata"] = metadata
+		}
+
 		data = append(data, record)
 	}
 
