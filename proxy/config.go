@@ -37,6 +37,10 @@ type ModelConfig struct {
 
 	// Model filters see issue #174
 	Filters ModelFilters `yaml:"filters"`
+
+	// issue #264
+	Macros   map[string]string `yaml:"macros"`
+	Metadata []string          `yaml:"metadata"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -54,6 +58,8 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		Macros:           make(map[string]string),
+		Metadata:         []string{},
 	}
 
 	// the default cmdStop to taskkill /f /t /pid ${PID}
@@ -68,6 +74,8 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	*m = ModelConfig(defaults)
 	return nil
 }
+
+
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
@@ -273,6 +281,16 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		modelConfig.Cmd = StripComments(modelConfig.Cmd)
 		modelConfig.CmdStop = StripComments(modelConfig.CmdStop)
 
+		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace model-specific macros with macro values
+		for macroName, macroValue := range modelConfig.Macros {
+			macroSlug := fmt.Sprintf("${%s}", macroName)
+			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroValue)
+			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroValue)
+			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroValue)
+			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroValue)
+			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroValue)
+		}
+
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
 		for macroName, macroValue := range config.Macros {
 			macroSlug := fmt.Sprintf("${%s}", macroName)
@@ -319,7 +337,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 					continue // this is ok, has to be replaced by process later
 				}
 				if _, exists := config.Macros[macroName]; !exists {
-					return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
+					if _, exists := modelConfig.Macros[macroName]; !exists {
+						return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
+					}
 				}
 			}
 		}

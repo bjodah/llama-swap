@@ -481,3 +481,29 @@ models:
 	assert.NoError(t, err)
 	assert.Equal(t, "/path/to/server -p 9000 -hf author/model:F16", strings.Join(sanitizedCmd3, " "))
 }
+
+func TestConfig_ModelMacros(t *testing.T) {
+	content := `
+startPort: 9000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT} --ctx ${ctx_len}
+    macros:
+      ctx_len: "4096"
+    metadata:
+      - ctx_len
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	model1Config, ok := config.Models["model1"]
+	assert.True(t, ok)
+
+	sanitizedCmd, err := SanitizeCommand(model1Config.Cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, "/path/to/server -p 9000 --ctx 4096", strings.Join(sanitizedCmd, " "))
+
+	assert.Equal(t, "4096", model1Config.Macros["ctx_len"])
+	assert.Equal(t, []string{"ctx_len"}, model1Config.Metadata)
+}

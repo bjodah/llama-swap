@@ -5,17 +5,19 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 )
 
 type Model struct {
-	Id          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	State       string `json:"state"`
-	Unlisted    bool   `json:"unlisted"`
+	Id          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	State       string         `json:"state"`
+	Unlisted    bool           `json:"unlisted"`
+	Metadata    map[string]any `json:"metadata"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
@@ -69,12 +71,29 @@ func (pm *ProxyManager) getModelStatus() []Model {
 				state = stateStr
 			}
 		}
+
+		metadata := make(map[string]any)
+		modelConfig := pm.config.Models[modelID]
+		for _, key := range modelConfig.Metadata {
+			if value, ok := modelConfig.Macros[key]; ok {
+				// attempt to convert to a number
+				if i, err := strconv.Atoi(value); err == nil {
+					metadata[key] = i
+				} else if f, err := strconv.ParseFloat(value, 64); err == nil {
+					metadata[key] = f
+				} else {
+					metadata[key] = value
+				}
+			}
+		}
+
 		models = append(models, Model{
 			Id:          modelID,
 			Name:        pm.config.Models[modelID].Name,
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
+			Metadata:    metadata,
 		})
 	}
 
