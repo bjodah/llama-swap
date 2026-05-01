@@ -135,7 +135,7 @@
          (buf      (current-buffer))
          (proc-buf (generate-new-buffer " *llama-swap-chat-curl*"))
          (args     (append
-                    (list "--silent" "--show-error" "--no-buffer" "-N")
+                    (list "--silent" "--show-error" "--fail" "--no-buffer" "-N")
                     (when auth-hdr (list "-H" auth-hdr))
                     (list "-H" "Content-Type: application/json"
                           "-H" "Accept: text/event-stream"
@@ -226,14 +226,14 @@
       (when (buffer-live-p chat-buf)
         (with-current-buffer chat-buf
           (setq llama-swap-chat--process nil
-                llama-swap-chat--sse-remainder ""
-                llama-swap-chat--response-marker nil)
+                llama-swap-chat--sse-remainder "")
           (let ((exit-code (process-exit-status proc)))
             (unless (zerop exit-code)
               (llama-swap-chat--append-text
                (format "\n[Generation error: curl exit %d]\n" exit-code))))
           ;; Save last assistant response to history
           (llama-swap-chat--save-assistant-response)
+          (setq llama-swap-chat--response-marker nil)
           ;; Insert new user prompt
           (llama-swap-chat--insert-prompt)
           (goto-char (point-max)))))))

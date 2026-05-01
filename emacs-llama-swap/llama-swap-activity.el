@@ -42,7 +42,7 @@
   (setq-local revert-buffer-function
               (lambda (_ignore-auto _noconfirm) (llama-swap-activity-refresh)))
   (add-hook 'llama-swap-state-metrics-changed-hook
-            #'llama-swap-activity--refresh-if-visible nil t))
+            #'llama-swap-activity--refresh-if-visible))
 
 ;;; --- Entry conversion ---
 

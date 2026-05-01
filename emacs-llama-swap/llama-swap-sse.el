@@ -49,12 +49,11 @@
 
 (defun llama-swap-sse-start ()
   "Start the SSE event stream.  No-op if already running."
-  (when (and llama-swap-sse--process
-             (process-live-p llama-swap-sse--process))
-    (message "llama-swap: SSE stream already running")
-    (cl-return-from llama-swap-sse-start nil))
-  (setq llama-swap-sse--intentional-stop nil)
-  (llama-swap-sse--connect))
+  (if (and llama-swap-sse--process
+           (process-live-p llama-swap-sse--process))
+      (message "llama-swap: SSE stream already running")
+    (setq llama-swap-sse--intentional-stop nil)
+    (llama-swap-sse--connect)))
 
 (defun llama-swap-sse-stop ()
   "Stop the SSE event stream and cancel any pending reconnect."
@@ -98,12 +97,12 @@
 (defun llama-swap-sse--make-filter (gen)
   "Return a process filter for generation GEN."
   (lambda (proc output)
-    (unless (= gen llama-swap-state--event-generation)
-      (delete-process proc)
-      (cl-return-from nil nil))
-    (setq llama-swap-sse--remainder
-          (concat llama-swap-sse--remainder output))
-    (llama-swap-sse--process-remainder gen)))
+    (if (= gen llama-swap-state--event-generation)
+        (progn
+          (setq llama-swap-sse--remainder
+                (concat llama-swap-sse--remainder output))
+          (llama-swap-sse--process-remainder gen))
+      (delete-process proc))))
 
 (defun llama-swap-sse--process-remainder (gen)
   "Parse and dispatch all complete SSE frames in `llama-swap-sse--remainder'.
@@ -194,18 +193,13 @@ Leaves incomplete trailing data in place."
 (defun llama-swap-sse--make-sentinel (gen)
   "Return a process sentinel for generation GEN."
   (lambda (proc _event)
-    ;; Ignore sentinels from old generations
-    (unless (= gen llama-swap-state--event-generation)
-      (cl-return-from nil nil))
-    ;; Only handle the final exit
-    (unless (process-live-p proc)
+    ;; Ignore sentinels from old generations and any non-final transitions.
+    (when (and (= gen llama-swap-state--event-generation)
+               (not (process-live-p proc)))
       (when (buffer-live-p (process-buffer proc))
         (kill-buffer (process-buffer proc)))
       (setq llama-swap-sse--process nil
             llama-swap-sse--remainder "")
-      (unless (eq llama-swap-state--connection 'connected)
-        ;; Never successfully connected; count as disconnected
-        )
       (llama-swap-state-set-connection 'disconnected)
       (unless llama-swap-sse--intentional-stop
         (llama-swap-sse--schedule-reconnect)))))

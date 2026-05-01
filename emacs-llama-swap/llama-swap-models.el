@@ -55,11 +55,11 @@
   (tabulated-list-init-header)
   (setq-local revert-buffer-function #'llama-swap-models--revert)
   (add-hook 'llama-swap-state-models-changed-hook
-            #'llama-swap-models--refresh-if-visible nil t)
+            #'llama-swap-models--refresh-if-visible)
   (add-hook 'llama-swap-state-connection-changed-hook
-            #'llama-swap-models--update-header nil t)
+            #'llama-swap-models--update-header)
   (add-hook 'llama-swap-state-inflight-changed-hook
-            #'llama-swap-models--update-header nil t)
+            #'llama-swap-models--update-header)
   (llama-swap-models--update-header))
 
 ;;; --- Header line ---
@@ -120,32 +120,37 @@
 
 ;;; --- Refresh ---
 
-(defun llama-swap-models--revert (_ignore-auto _noconfirm)
+(defun llama-swap-models--revert (&optional _ignore-auto _noconfirm)
   "Revert handler: refresh models from server."
   (llama-swap-models-refresh))
 
+(defun llama-swap-models--redraw ()
+  "Redraw the models list from the current state."
+  (when (buffer-live-p (get-buffer llama-swap-models--buffer-name))
+    (with-current-buffer llama-swap-models--buffer-name
+      (setq tabulated-list-entries
+            (mapcar #'llama-swap-models--entry-to-row
+                    (llama-swap-models--visible-models)))
+      (tabulated-list-print t)
+      (llama-swap-models--update-header))))
+
 (defun llama-swap-models-refresh ()
-  "Refresh model list.  Fetches /api/models if available, else reconnects SSE."
+  "Refresh model list.
+If the SSE stream is connected, this simply redraws the buffer from memory
+since state is kept live.  If disconnected, it reconnects the SSE stream."
   (interactive)
-  (llama-swap-http-get
-   "/api/models" nil
-   (lambda (status data _err)
-     (if (and (= status 200) (listp data))
-         (llama-swap-state-set-models data)
-       ;; Fallback: reconnect SSE to get fresh modelStatus
-       (require 'llama-swap-sse)
-       (llama-swap-reconnect)))))
+  (require 'llama-swap-sse)
+  (if (llama-swap-sse-connected-p)
+      (progn
+        (llama-swap-models--redraw)
+        (message "llama-swap: models are live-updating via SSE"))
+    (llama-swap-reconnect)))
 
 (defun llama-swap-models--refresh-if-visible ()
   "Refresh the dashboard buffer if it is currently visible."
   (let ((buf (get-buffer llama-swap-models--buffer-name)))
     (when (and buf (get-buffer-window buf))
-      (with-current-buffer buf
-        (setq tabulated-list-entries
-              (mapcar #'llama-swap-models--entry-to-row
-                      (llama-swap-models--visible-models)))
-        (tabulated-list-print t)
-        (llama-swap-models--update-header)))))
+      (llama-swap-models--redraw))))
 
 ;;; --- Commands ---
 

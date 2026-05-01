@@ -87,7 +87,7 @@ HOOKS are hook variable symbols to add a refresh listener to."
       (setq-local llama-swap-logs--content-fn content-fn)
       ;; Add hooks
       (dolist (hook hooks)
-        (add-hook hook #'llama-swap-logs--refresh-if-visible nil t))
+        (add-hook hook #'llama-swap-logs--refresh-visible-buffers))
       (llama-swap-logs--render buf content-fn))
     (switch-to-buffer-other-window buf)))
 
@@ -112,6 +112,16 @@ HOOKS are hook variable symbols to add a refresh listener to."
                (get-buffer-window buf)
                llama-swap-logs--content-fn)
       (llama-swap-logs--render buf llama-swap-logs--content-fn))))
+
+(defun llama-swap-logs--refresh-visible-buffers ()
+  "Refresh all visible llama-swap log buffers."
+  (dolist (buf (buffer-list))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (when (and (derived-mode-p 'llama-swap-logs-mode)
+                   (get-buffer-window buf)
+                   llama-swap-logs--content-fn)
+          (llama-swap-logs--render buf llama-swap-logs--content-fn))))))
 
 (defun llama-swap-logs-refresh ()
   "Refresh the current log buffer."

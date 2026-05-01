@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'auth-source)
+(require 'subr-x)
 (require 'url-parse)
 
 (defvar llama-swap-auth--cached-key nil
@@ -33,17 +34,26 @@ Returns key string or nil."
           (if (functionp secret) (funcall secret) secret))))))
 
 (defun llama-swap-auth--try-explicit ()
-  "Return `llama-swap-api-key' if non-nil."
-  (symbol-value 'llama-swap-api-key))
+  "Return `llama-swap-api-key' if configured.
+Return the symbol `none' when it is the empty string, which explicitly
+disables authentication and auth-source lookup."
+  (let ((key (symbol-value 'llama-swap-api-key)))
+    (cond
+     ((null key) nil)
+     ((and (stringp key) (string-empty-p key)) 'none)
+     (t key))))
 
 (defun llama-swap-auth-get-key ()
   "Return the API key string, or nil if none is configured.
 Tries: 1) cache, 2) explicit `llama-swap-api-key', 3) auth-source."
   (when (null llama-swap-auth--cached-key)
-    (setq llama-swap-auth--cached-key
-          (or (llama-swap-auth--try-explicit)
-              (llama-swap-auth--try-auth-source)
-              'none)))
+    (let ((explicit (llama-swap-auth--try-explicit)))
+      (setq llama-swap-auth--cached-key
+            (cond
+             ((eq explicit 'none) 'none)
+             (explicit explicit)
+             ((llama-swap-auth--try-auth-source))
+             (t 'none)))))
   (if (eq llama-swap-auth--cached-key 'none)
       nil
     llama-swap-auth--cached-key))

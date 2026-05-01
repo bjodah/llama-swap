@@ -33,6 +33,20 @@
   (let ((llama-swap-api-key nil))
     (should (null (llama-swap-auth--try-explicit)))))
 
+(ert-deftest llama-swap-test-auth-empty-string-disables-auth ()
+  "Empty explicit key disables auth-source lookup and sends no auth header."
+  (let ((llama-swap-api-key "")
+        (llama-swap-auth--cached-key nil)
+        (auth-source-called nil))
+    (cl-letf (((symbol-function 'llama-swap-auth--try-auth-source)
+               (lambda ()
+                 (setq auth-source-called t)
+                 "auth-source-key")))
+      (should (null (llama-swap-auth-get-key)))
+      (should (eq llama-swap-auth--cached-key 'none))
+      (should-not auth-source-called)
+      (should (null (llama-swap-auth-header))))))
+
 (ert-deftest llama-swap-test-auth-no-key ()
   "get-key returns nil when no key is configured."
   (let ((llama-swap-api-key nil)
@@ -508,6 +522,56 @@ Starts with connection already `connected' to skip the version-fetch block."
    ;; Remainder should still contain the incomplete frame
    (should (string-match-p "partial-line" llama-swap-sse--remainder))))
 
+(ert-deftest llama-swap-test-sse-filter-stale-generation-no-error ()
+  "Filter for a stale generation deletes the proc and returns cleanly."
+  (let ((llama-swap-state--event-generation 1)
+        (proc nil))
+    (unwind-protect
+        (progn
+          (setq proc (start-process "llama-swap-test-sse-stale" nil
+                                    "sleep" "10"))
+          (let ((filter (llama-swap-sse--make-filter 0)))
+            (funcall filter proc "junk\n\n"))
+          (should-not (process-live-p proc)))
+      (when (and proc (process-live-p proc))
+        (delete-process proc)))))
+
+(ert-deftest llama-swap-test-sse-sentinel-stale-generation-no-error ()
+  "Sentinel for a stale generation returns cleanly without signalling."
+  (let ((llama-swap-state--event-generation 1)
+        (llama-swap-sse--process 'placeholder)
+        (proc nil))
+    (unwind-protect
+        (progn
+          (setq proc (start-process "llama-swap-test-sse-stale-sent"
+                                    nil "true"))
+          (while (process-live-p proc)
+            (accept-process-output proc 0.1))
+          (let ((sentinel (llama-swap-sse--make-sentinel 0)))
+            (funcall sentinel proc "finished\n"))
+          ;; Stale-generation sentinel must not touch global SSE state.
+          (should (eq llama-swap-sse--process 'placeholder)))
+      (when (and proc (process-live-p proc))
+        (delete-process proc)))))
+
+(ert-deftest llama-swap-test-sse-start-while-running-no-error ()
+  "Calling start while a process is alive is a no-op, not a Lisp error."
+  (let ((proc nil)
+        (llama-swap-sse--process nil)
+        (llama-swap-sse--intentional-stop nil))
+    (unwind-protect
+        (progn
+          (setq proc (start-process "llama-swap-test-sse-running"
+                                    nil "sleep" "10"))
+          (setq llama-swap-sse--process proc)
+          ;; Must not signal; must not call --connect.
+          (cl-letf (((symbol-function 'llama-swap-sse--connect)
+                     (lambda () (error "should not reconnect"))))
+            (llama-swap-sse-start)))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (setq llama-swap-sse--process nil))))
+
 ;;; ============================================================
 ;;; Models dashboard tests
 ;;; ============================================================
@@ -600,6 +664,52 @@ Starts with connection already `connected' to skip the version-fetch block."
              ((id . "peer")  (peerID . "remote-peer")))))
       (setq llama-swap-models--show-peers t)
       (should (= (length (llama-swap-models--visible-models)) 2)))))
+
+(ert-deftest llama-swap-test-models-global-hook-refreshes-from-other-buffer ()
+  "SSE-triggered model hook refreshes the dashboard outside its buffer."
+  (let ((llama-swap-state-models-changed-hook nil)
+        (llama-swap-state-connection-changed-hook nil)
+        (llama-swap-state-inflight-changed-hook nil)
+        (llama-swap-state--models '(((id . "hook-model")
+                                      (name . "Hook Model")
+                                      (state . "ready"))))
+        (buf (get-buffer-create llama-swap-models--buffer-name)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (_buffer &optional _frame) t)))
+          (with-current-buffer buf
+            (llama-swap-models-mode)
+            (setq tabulated-list-entries nil))
+          (with-temp-buffer
+            (run-hooks 'llama-swap-state-models-changed-hook))
+          (with-current-buffer buf
+            (should (= (length tabulated-list-entries) 1))
+            (should (equal (caar tabulated-list-entries) "hook-model"))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+;;; ============================================================
+;;; Log tests
+;;; ============================================================
+
+(ert-deftest llama-swap-test-logs-global-hook-refreshes-from-other-buffer ()
+  "SSE-triggered log hook refreshes visible log buffers outside their buffer."
+  (let ((llama-swap-state-proxy-log-changed-hook nil)
+        (llama-swap-state--proxy-log "")
+        (buf nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window)
+                   (lambda (_buffer &optional _frame) t))
+                  ((symbol-function 'switch-to-buffer-other-window)
+                   (lambda (buffer-or-name &optional _norecord)
+                     (setq buf (get-buffer buffer-or-name)))))
+          (llama-swap-logs-open-proxy)
+          (with-temp-buffer
+            (llama-swap-state-append-log "proxy" "hello from hook\n"))
+          (with-current-buffer buf
+            (should (string-match-p "hello from hook" (buffer-string)))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
 
 ;;; ============================================================
 ;;; Activity tests
@@ -857,6 +967,29 @@ Starts with connection already `connected' to skip the version-fetch block."
     (llama-swap-chat-mode)
     (llama-swap-chat--render-message "assistant" "my response")
     (should (string-match-p "Assistant" (buffer-string)))))
+
+(ert-deftest llama-swap-test-chat-sentinel-appends-curl-error ()
+  "Non-zero curl exit status is inserted into the assistant response."
+  (let ((proc nil)
+        (proc-buf nil))
+    (unwind-protect
+        (with-temp-buffer
+          (llama-swap-chat-mode)
+          (insert "\n--- Assistant ---\n")
+          (setq llama-swap-chat--response-marker (point-marker))
+          (setq proc-buf (generate-new-buffer " *llama-swap-test-chat*"))
+          (setq proc (start-process "llama-swap-test-chat-error"
+                                    proc-buf "sh" "-c" "exit 22"))
+          (while (process-live-p proc)
+            (accept-process-output proc 0.1))
+          (funcall (llama-swap-chat--make-sentinel (current-buffer))
+                   proc "finished\n")
+          (should (string-match-p "Generation error: curl exit 22"
+                                  (buffer-string))))
+      (when (and proc (process-live-p proc))
+        (delete-process proc))
+      (when (buffer-live-p proc-buf)
+        (kill-buffer proc-buf)))))
 
 (provide 'llama-swap-test)
 ;;; llama-swap-test.el ends here
